@@ -1,0 +1,3 @@
+average_response pa0365/gm_response.txt pa0311/gm_response.txt pa0310/gm_response.txt pa0655/gm_response.txt pa0727/gm_response.txt pa0769/gm_response.txt pa0923/gm_response.txt gm_response_avg.txt
+average_response pa0365/wm_response.txt pa0311/wm_response.txt pa0310/wm_response.txt pa0655/wm_response.txt pa0727/wm_response.txt pa0769/wm_response.txt pa0923/wm_response.txt wm_response_avg.txt
+average_response pa0365/csf_response.txt pa0311/csf_response.txt pa0310/csf_response.txt pa0655/csf_response.txt pa0727/csf_response.txt pa0769/csf_response.txt pa0923/csf_response.txt csf_response_avg.txt

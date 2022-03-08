@@ -1,0 +1,65 @@
+Constrained Spherical Deconvolution Pipeline for A214 via MRTrix3
+running MRTrix3 v 3.0.2 via container on UConn HPC
+
+Preparing environment:
+pull container: hpc_scripts/sbatch_build_container.sh
+create a folder in your scratch directory called a214_data
+copy bids-formatted data to scratch/YOURNETID/a214_data
+create sub-folders: scratch/YOURNETID/a214_data/derivatives/mrtrix
+scratch/YOURNETID/a214_data/derivatives/mrtrix will be the output folder for processed data
+copy scripts from hpc_scripts to your scratch directory
+add rwx permissions to all your scripts using chmod 777 *.sh
+some scripts use multithreading, indicated by the -nthreads option. before running the script, make sure that the # of cpus-per-task and OMP_NUM_THREADS and ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS options in run_container_mrtrix.sh are set to match the # of threads in the script
+
+
+How to run scripts in mrtrix container
+to run a single subject:
+sbatch run_container_mrtrix.sh ./1b_dwi_prep_all_bids_3run_hpc.sh sub-214999
+To submit jobs for a batch of subjects, create a script to loop over subjects for job submission
+see submit_jobs_batch_example.sh in hcp_scripts
+*unless otherwise noted, run all scripts below using the container
+
+Phase 1: Preprocessing
+1. run mrtrix/FSL preproc: denoising, degibbs, topup, eddy via HPC: hpc_scripts/1b_dwi_prep_all_bids_3run_hpc.sh 
+	copy outputs back to R-drive for visual inspection of res.mif and degibbs outputs (update cpfromHPC.sh in the R-drive a2214/derivatives/mrtrix folder)
+2. run eddy_quad on local machine (doesn't work in container) using 2b_eddy_qc_3run.sh
+	using MATLAB, run 2c_Json_to_csv_output_for_diffusionQC.m to extract QC parameters from subjects' eddyqc outputs to a csv file (the matlab script is for 2018a, may need to change for later versions)
+	using python, use 2d_eddy_quad_merge.py to evaluate pass/fail and merge eddyqc output with dwi data tracking spreadsheet
+	Review spreadsheet for eddyqc pass/fail, no further processing for subjects who failed at this step
+3. DO NOT run bias correction (in this step it's just for better mask estimation, but actually resulted in worse masks in our sample)
+
+Phase 2: CSD
+4. run 4_dwi2resp_upsample_betmask.sh for response estimation, upsampling, and brainmask creation using BET  *up to this step can be done for each subj. separately
+	after this step, copy data from HPC and visually inspect dwi_preproc_upsampled_bet_mask.nii.gz, make edits if needed, best to have a conservative mask for subsequent step
+*5. run group avg response function -> create group average used for subsequent processing *need all subjects data ready here (ok to use a sub-set of 30-40 subjects for this per mrtrix documentation, so no need to re-run with new subjects)
+6. run 6_dwi2fod.sh to run fiber orientation distribution estimation: multi-shell, multi-tissue CSD - use bet brainmask
+7. run mtnormalise bias-correction  and normalization of fods (this is instead of dwi_normalise group) - use conservative brain mask!
+
+Phase 3: Prep data for FBA
+*8. run 8_prep_template_folder.sh to create template directory and link subject FOD and mask images - do this outside the container, just in the command line in the login node should be fine
+*9. run 9_create_FOD_template.sh (via container) to create a study-specific unbiased FOD template !This step took 19 hours 46 mins on the hpc using 16 threads - be sure to adjust slurm job accordingly. If process times out, use -continue option to run from where it left off
+*these steps were done with N=37 subjects for MP dissertation and do not need to be repeated with the full sample
+10. run 10_mrregister.sh to register each subject's FOD image to the study-specific template, warp masks to template space (takes about 10 mins per subject)
+11. run 11_templatemask.sh to compute template mask (1 job for whole group - this one goes quick!)
+	check template mask to ensure all areas intended to be analyzed are included!
+12. run 12_fod2fixel.sh to compute WM template analysis fixel mask (1 job for whole group)
+13-15. run 13-15_warp_seg_reorient.sh to warp subject FODs to template, segment fixels, and reorient to template (<5 mins per subject)
+16. run 16_fixelcorrespondence.sh to match each subject's fixels to template fixels & save outputs to a common fixel directory for analysis !run this sequentially, not multiple subjects at once! the script will loop subjects WITHIN the container, so you don't submit multiple jobs; <20 mins to run all subjects
+17. run 17_warp2metric.sh to compute the fiber cross section (FC) metric for each subject !as for step 16, run this one as a loop within the container (runs super fast!)
+17b. run 17b_logfc.sh to compute log(FC) values - recommended to ensure data are centered around 0 and normally distributed
+18. run 18_compute_FDC to compute FDC metric for each subject; can be run as single jobs per subject or in a loop, but it's a quick process, so no need to submit multiple jobs
+19. run 19_tckgen for whole-brain tractography on the FOD template (this one takes a long time - 3hr 51 mins on HPC w/ 16 threads)
+20. run 20_tcksift to reduce biases in whole-brain tractogram (took 1hr 6 mins with 16 threads)
+21. run 21_fixelconnectivity to generate fixel-fixel connectivity matrix (requires ~32 GB RAM, shouldn't be a problem on the HPC, took ~25 mins with 16 threads)
+22. run 22_fixelfilter to smooth fixel data
+23. run 23_fixelcfestats to run the Fixel-Based Analysis! 
+	first create subject list, design matrix, and contrast matrix & upload to HPC under the template directory
+	subject list (files.txt) must list subjects in the order of the data in the design matrix, and include the .mif file ending
+	design matrix consists of 1 row per subject, with each column representing a variable in the design. A column of 1s is included at left to represent the global intercept
+	contrast matrix cols correspond to the cols in the design matrix, include 0s for global intercept & nuisance vars, 1s for vars of interest for correlation
+	fixelcfestats runs a one-tailed test, so need to run separate tests for pos and neg effects by using 2 rows in the contrast matrix, one with 1 and one with -1
+	Use scripts 23a, 23b, and 23c on the HPC to run a separate job for each stat (same design matrix & contrast matrix can be used for all of them)
+	
+
+
+
